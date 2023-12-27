@@ -1,4 +1,5 @@
 use clap::Parser;
+use num_complex::ComplexFloat;
 use num_complex::{Complex32, Complex64};
 use reed_solomon::Decoder;
 use rustfft::FftPlanner;
@@ -127,6 +128,14 @@ fn detect_symbol_timing_metrics(
         }
     }
     return min_i;
+}
+
+fn estimate_carrier_offset(signal: &[Complex32], symbol_len: usize, guard_interval_len: usize) -> f32 {
+    let mut r = Complex32::default();
+    for i in 0..guard_interval_len {
+        r +=signal[i].conj() * signal[i + symbol_len];
+    }
+    return r.arg();
 }
 
 fn read_iq(
@@ -688,6 +697,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut prev_cfo = usize::MAX;
     let cnr_interval = 10000;
     let mut cnr_counter = 0;
+    let mut offset = 0usize;
     loop {
         calc_mmse(
             &iq_buffer[0..search_range * 2 + guard_interval_len],
@@ -698,10 +708,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if args.verbose {
             eprintln!("valid symbol offset: {m}");
         }
+        let delta = estimate_carrier_offset(&iq_buffer[m..], symbol_len, guard_interval_len);
+        let t_s = 1.0f32 / 8126984.0f32;
+        let delta = delta / (2.0f32 * std::f32::consts::PI * symbol_len as f32 * t_s);
+        if args.verbose {
+            eprintln!("freq offset: {delta}");
+        }
         let symbol_begin = m + guard_interval_len;
         let symbol_end = m + guard_interval_len + symbol_len;
         let next_off = m + symbol_len;
         carriers.copy_from_slice(&iq_buffer[symbol_begin..symbol_end]);
+        let mut dc_offset = Complex32::default();
+        for c in &carriers {
+            dc_offset += c;
+        }
+        dc_offset /= carriers.len() as f32;
+        for (i, c) in carriers.iter_mut().enumerate() {
+            let t = (offset + i + symbol_begin) as f32 * t_s;
+            *c = (*c - dc_offset) * Complex32::new(0.0, -2.0f32 * std::f32::consts::PI * delta * t).exp();
+        }
         fft.process(&mut carriers);
         carriers[0] = Complex32::default(); // remove DC offset
         let (positive_freq, negative_freq) = carriers.split_at_mut(symbol_len / 2);
@@ -905,6 +930,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         iq_buffer.copy_within(next_off.., 0);
         let next = iq_buffer.len() - next_off;
+        offset += next;
         read_iq(&mut reader, &mut buffer, &mut iq_buffer[next..], args.bit)?;
     }
 }

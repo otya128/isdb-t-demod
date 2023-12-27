@@ -32,8 +32,6 @@ miri_sdr -f 473142857 -s 8126984 -w 6000000 -i 0 -m 384_S16 > sample.raw
 ./target/release/isdb-t-demod --input sample.raw --output test.ts
 ```
 
-`CFO`の絶対値が大きすぎるとうまく復調できないため、選局周波数から`-992*CFO`だけずらして調整する必要あり
-
 うまく復調できると以下のような出力が得られます。
 ```
 CFO: -1
@@ -44,7 +42,7 @@ symbol buffer not filled
 FRAME DETECTED 1
 symbol buffer not filled
 FRAME DETECTED 2
-CNR = 11.87 dB
+CNR = 19.46 dB
 byte buffer not filled
 ...
 FRAME DETECTED 3
